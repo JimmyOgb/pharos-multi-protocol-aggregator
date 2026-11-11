@@ -1,6 +1,60 @@
 // Pharos Multi-Protocol Aggregator — Client Controller
+// Production Build with Resilient Network Error Handling & Safe JSON Parsing
 
 let currentAccount = null;
+
+// Safe Network Fetcher: Never throws unhandled JSON parse exceptions on HTML/text 404/500/502 responses
+async function safeFetchJson(url, options = {}) {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), options.timeoutMs || 15000);
+
+  try {
+    const res = await fetch(url, {
+      ...options,
+      signal: controller.signal,
+    });
+    clearTimeout(timeoutId);
+
+    const contentType = res.headers.get('content-type') || '';
+    const isJson = contentType.toLowerCase().includes('application/json');
+
+    if (isJson) {
+      const data = await res.json();
+      if (!res.ok) {
+        return {
+          ok: false,
+          status: res.status,
+          error: data.error || `HTTP ${res.status} ${res.statusText || 'Error'}`,
+          data,
+        };
+      }
+      return { ok: true, status: res.status, data };
+    } else {
+      const rawText = await res.text();
+      const snippet = rawText.trim().slice(0, 150);
+      const readableError = res.status === 404
+        ? `API endpoint not found (HTTP 404): The requested route is unavailable.`
+        : `Server returned non-JSON response (HTTP ${res.status} ${res.statusText || ''}): ${snippet || 'No body'}`;
+
+      return {
+        ok: false,
+        status: res.status,
+        error: readableError,
+        rawSnippet: snippet,
+      };
+    }
+  } catch (netErr) {
+    clearTimeout(timeoutId);
+    const isTimeout = netErr.name === 'AbortError';
+    return {
+      ok: false,
+      status: isTimeout ? 504 : 0,
+      error: isTimeout
+        ? 'Request timed out after 15 seconds. Pharos RPC or edge server is taking too long to respond.'
+        : `Network connection failed: ${netErr.message || 'Check your internet connection.'}`,
+    };
+  }
+}
 
 document.addEventListener('DOMContentLoaded', () => {
   initTabs();
@@ -79,75 +133,83 @@ function handleAccountsChanged(accounts) {
 // 3. Load Protocol Registry
 async function loadProtocols() {
   const grid = document.getElementById('protocols-grid');
-  grid.innerHTML = '<div class="text-muted">Loading live protocol venues from Pharos RPC...</div>';
+  grid.innerHTML = '<div class="text-muted" style="padding:1.5rem;">Loading live protocol venues from Pharos RPC...</div>';
 
-  try {
-    const res = await fetch('/api/protocols');
-    const data = await res.json();
+  const result = await safeFetchJson('/api/protocols');
 
-    if (!data.success || !data.venues) {
-      grid.innerHTML = '<div class="alert alert-danger">Failed to load protocol registry.</div>';
-      return;
-    }
+  if (!result.ok || !result.data?.success || !result.data?.venues) {
+    grid.innerHTML = `
+      <div class="alert alert-danger" style="grid-column: 1 / -1;">
+        <strong>Failed to load protocol registry (Status: ${result.status || 'Offline'}):</strong>
+        <p style="margin:0.5rem 0 0.75rem 0;">${result.error}</p>
+        <button class="btn btn-secondary" style="font-size:0.8rem; padding:0.4rem 0.8rem;" onclick="loadProtocols()">
+          Retry Loading Protocols
+        </button>
+      </div>
+    `;
+    return;
+  }
 
-    grid.innerHTML = '';
-    data.venues.forEach((v) => {
-      const card = document.createElement('div');
-      card.className = 'protocol-card';
+  const venues = result.data.venues;
+  grid.innerHTML = '';
+  venues.forEach((v) => {
+    const card = document.createElement('div');
+    card.className = 'protocol-card';
 
-      const statusBadge =
-        v.status === 'ONLINE'
-          ? '<span class="badge badge-success">ONLINE</span>'
-          : `<span class="badge badge-danger">${v.status}</span>`;
+    const statusBadge =
+      v.status === 'ONLINE'
+        ? '<span class="badge badge-success">ONLINE</span>'
+        : `<span class="badge badge-danger">${v.status}</span>`;
 
-      card.innerHTML = `
-        <div class="protocol-header">
-          <div>
-            <div class="protocol-category">${v.category}</div>
-            <div class="protocol-title">${v.name}</div>
-          </div>
-          ${statusBadge}
+    card.innerHTML = `
+      <div class="protocol-header">
+        <div>
+          <div class="protocol-category">${v.category}</div>
+          <div class="protocol-title">${v.name}</div>
         </div>
-        <div class="text-sm text-muted">
-          Contract: <a href="https://www.pharosscan.xyz/address/${v.contractAddress}" target="_blank" class="footer-link font-mono">${v.contractAddress.slice(0, 8)}...${v.contractAddress.slice(-6)}</a>
-        </div>
-        <div class="metric-row">
-          <span class="metric-label">Target Asset:</span>
-          <span class="metric-val">${v.underlyingAsset} → ${v.shareAsset}</span>
-        </div>
-        <div class="metric-row">
-          <span class="metric-label">Reported TVL:</span>
-          <span class="metric-val">${v.metrics.tvlFormatted}</span>
-        </div>
-        <div class="metric-row">
-          <span class="metric-label">Annual Net APY:</span>
-          <span class="metric-val text-emerald">${v.metrics.netApyPercent > 0 ? v.metrics.netApyPercent.toFixed(2) + '%' : '0.0% (Wrapper)'}</span>
-        </div>
-        <div class="metric-row">
-          <span class="metric-label">Exchange Rate:</span>
-          <span class="metric-val">${v.metrics.exchangeRate.toFixed(4)} ${v.underlyingAsset}/${v.shareAsset}</span>
-        </div>
-        <div class="metric-row">
-          <span class="metric-label">Unbonding Window:</span>
-          <span class="metric-val">${v.metrics.unbondingPeriodDays > 0 ? v.metrics.unbondingPeriodDays + ' Days' : '0s (Instant)'}</span>
-        </div>
-        <div class="metric-row">
-          <span class="metric-label">Risk Profile:</span>
-          <span class="metric-val">${v.metrics.riskTier}</span>
-        </div>
-        <div class="text-sm text-muted mt-2">
-          ${v.metrics.riskSummary}
-        </div>
-      `;
-      grid.appendChild(card);
-    });
+        ${statusBadge}
+      </div>
+      <div class="text-sm text-muted">
+        Contract: <a href="https://www.pharosscan.xyz/address/${v.contractAddress}" target="_blank" class="footer-link font-mono">${v.contractAddress.slice(0, 8)}...${v.contractAddress.slice(-6)}</a>
+      </div>
+      <div class="metric-row">
+        <span class="metric-label">Target Asset:</span>
+        <span class="metric-val">${v.underlyingAsset} → ${v.shareAsset}</span>
+      </div>
+      <div class="metric-row">
+        <span class="metric-label">Reported TVL:</span>
+        <span class="metric-val">${v.metrics.tvlFormatted}</span>
+      </div>
+      <div class="metric-row">
+        <span class="metric-label">Net APY:</span>
+        <span class="metric-val text-emerald font-semibold">${v.metrics.netApyPercent > 0 ? v.metrics.netApyPercent.toFixed(2) + '%' : '0.00%'}</span>
+      </div>
+      <div class="metric-row">
+        <span class="metric-label">Exchange Rate:</span>
+        <span class="metric-val">${v.metrics.exchangeRateDescription || '1:1 Parity'}</span>
+      </div>
+      <div class="metric-row">
+        <span class="metric-label">Unbonding Window:</span>
+        <span class="metric-val">${v.metrics.unbondingPeriodDays > 0 ? v.metrics.unbondingPeriodDays.toFixed(1) + ' Days' : '0 Days (Instant)'}</span>
+      </div>
+      <div class="metric-row">
+        <span class="metric-label">Risk Tier:</span>
+        <span class="badge badge-outline">${v.metrics.riskTier}</span>
+      </div>
+      <div class="metric-row">
+        <span class="metric-label">Data Freshness:</span>
+        <span class="badge badge-success">${v.dataFreshness}</span>
+      </div>
+      <div class="mt-4" style="border-top:1px solid var(--border-color); padding-top:0.75rem; font-size:0.75rem; color:var(--text-muted);">
+        Verified via: ${v.verifiedSource}
+      </div>
+    `;
+    grid.appendChild(card);
+  });
 
-    const refreshBtn = document.getElementById('refresh-protocols-btn');
-    if (refreshBtn) {
-      refreshBtn.onclick = () => loadProtocols();
-    }
-  } catch (err) {
-    grid.innerHTML = `<div class="alert alert-danger">Error: ${err.message}</div>`;
+  const refreshBtn = document.getElementById('refresh-protocols-btn');
+  if (refreshBtn) {
+    refreshBtn.onclick = () => loadProtocols();
   }
 }
 
@@ -168,90 +230,102 @@ async function calculateRoute() {
 
   container.innerHTML = '<div class="text-muted text-center" style="padding:2rem;">Calculating optimal venue on Pharos Pacific Mainnet...</div>';
 
-  try {
-    const res = await fetch('/api/route', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ asset, amount, priority }),
-    });
+  const result = await safeFetchJson('/api/route', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ asset, amount, priority }),
+  });
 
-    const json = await res.json();
-    if (!json.success || !json.decision) {
-      container.innerHTML = `<div class="alert alert-danger">${json.error || 'Routing failed'}</div>`;
-      return;
-    }
-
-    const d = json.decision;
-    const v = d.selectedVenue;
-
-    if (!v) {
-      container.innerHTML = `
-        <div class="alert alert-warning">
-          <strong>No Eligible Route:</strong> ${d.selectionSummary}
-        </div>
-      `;
-      return;
-    }
-
+  if (!result.ok || !result.data?.success || !result.data?.decision) {
     container.innerHTML = `
-      <div class="alert alert-success">
+      <div class="alert alert-danger">
         <div style="display:flex; justify-content:space-between; align-items:center;">
-          <h3 style="margin:0; font-size:1.15rem;">Selected: ${v.name}</h3>
-          <span class="badge badge-success">${v.metrics.netApyPercent > 0 ? v.metrics.netApyPercent.toFixed(2) + '% APY' : '1:1 Parity'}</span>
+          <strong>Route Calculation Error (Status ${result.status || 'Offline'})</strong>
+          <span class="badge badge-danger">${result.status ? 'HTTP ' + result.status : 'Network'}</span>
         </div>
-        <p style="margin-top:0.5rem; font-size:0.875rem;">${d.selectionSummary}</p>
-      </div>
-
-      <div class="mt-4">
-        <h4 style="font-size:0.875rem; text-transform:uppercase; color:var(--text-secondary); margin-bottom:0.5rem;">Why This Venue Was Selected</h4>
-        <ul style="padding-left:1.25rem; font-size:0.875rem; line-height:1.6;">
-          ${d.detailedReasoning.map((r) => `<li>${r}</li>`).join('')}
-        </ul>
-      </div>
-
-      <div class="mt-4">
-        <h4 style="font-size:0.875rem; text-transform:uppercase; color:var(--accent-warning); margin-bottom:0.5rem;">Relevant Trade-Offs</h4>
-        <ul style="padding-left:1.25rem; font-size:0.875rem; line-height:1.6; color:#fed7aa;">
-          ${d.tradeOffs.map((t) => `<li>${t}</li>`).join('')}
-        </ul>
-      </div>
-
-      <div class="mt-4" style="border-top:1px solid var(--border-color); padding-top:0.75rem; display:flex; justify-content:space-between; font-size:0.75rem; color:var(--text-muted);">
-        <span>Observed: ${new Date(d.dataProvenance.observationTime).toLocaleTimeString()}</span>
-        <span>RPC: Pharos Pacific Mainnet (1672)</span>
+        <p style="margin:0.5rem 0 0.75rem 0; font-size:0.875rem;">${result.error || 'Failed to calculate optimal route.'}</p>
+        <button class="btn btn-secondary" style="font-size:0.8rem; padding:0.4rem 0.8rem;" onclick="calculateRoute()">
+          Retry Calculation
+        </button>
       </div>
     `;
-
-    // Render Evaluation Matrix Table
-    const tableBody = document.getElementById('evaluation-table-body');
-    tableBody.innerHTML = '';
-
-    d.evaluations.forEach((evalItem) => {
-      const row = document.createElement('tr');
-      const statusBadge = evalItem.isEligible
-        ? '<span class="badge badge-success">Eligible</span>'
-        : '<span class="badge badge-danger">Excluded</span>';
-
-      const lockupText = evalItem.unbondingDays > 0 ? `${evalItem.unbondingDays.toFixed(1)} Days` : '0 Days (Instant)';
-
-      const factors = evalItem.isEligible
-        ? `<span class="text-emerald">${evalItem.pros.join('; ')}</span>`
-        : `<span class="text-danger">${evalItem.exclusionReason}</span>`;
-
-      row.innerHTML = `
-        <td><strong>${evalItem.venueName}</strong></td>
-        <td>${statusBadge}</td>
-        <td><strong class="${evalItem.score > 0 ? 'text-emerald' : 'text-muted'}">${evalItem.score.toFixed(1)}</strong></td>
-        <td>${evalItem.apyPercent > 0 ? evalItem.apyPercent.toFixed(2) + '%' : '0.0%'}</td>
-        <td>${lockupText}</td>
-        <td>${evalItem.tvlFormatted}</td>
-        <td style="max-width:320px;">${factors}</td>
-      `;
-      tableBody.appendChild(row);
-    });
-  } catch (err) {
-    container.innerHTML = `<div class="alert alert-danger">Error: ${err.message}</div>`;
+    return;
   }
+
+  const d = result.data.decision;
+  const v = d.selectedVenue;
+
+  if (!v) {
+    container.innerHTML = `
+      <div class="alert alert-warning">
+        <strong>No Eligible Route:</strong> ${d.selectionSummary}
+      </div>
+    `;
+    // Still render evaluations table so user sees why venues were excluded
+    renderEvaluationTable(d.evaluations || []);
+    return;
+  }
+
+  container.innerHTML = `
+    <div class="alert alert-success">
+      <div style="display:flex; justify-content:space-between; align-items:center;">
+        <h3 style="margin:0; font-size:1.15rem;">Selected: ${v.name}</h3>
+        <span class="badge badge-success">${v.metrics.netApyPercent > 0 ? v.metrics.netApyPercent.toFixed(2) + '% APY' : '1:1 Parity'}</span>
+      </div>
+      <p style="margin-top:0.5rem; font-size:0.875rem;">${d.selectionSummary}</p>
+    </div>
+
+    <div class="mt-4">
+      <h4 style="font-size:0.875rem; text-transform:uppercase; color:var(--text-secondary); margin-bottom:0.5rem;">Why This Venue Was Selected</h4>
+      <ul style="padding-left:1.25rem; font-size:0.875rem; line-height:1.6;">
+        ${d.detailedReasoning.map((r) => `<li>${r}</li>`).join('')}
+      </ul>
+    </div>
+
+    <div class="mt-4">
+      <h4 style="font-size:0.875rem; text-transform:uppercase; color:var(--accent-warning); margin-bottom:0.5rem;">Relevant Trade-Offs</h4>
+      <ul style="padding-left:1.25rem; font-size:0.875rem; line-height:1.6; color:#fed7aa;">
+        ${d.tradeOffs.map((t) => `<li>${t}</li>`).join('')}
+      </ul>
+    </div>
+
+    <div class="mt-4" style="border-top:1px solid var(--border-color); padding-top:0.75rem; display:flex; justify-content:space-between; font-size:0.75rem; color:var(--text-muted);">
+      <span>Observed: ${new Date(d.dataProvenance.observationTime).toLocaleTimeString()}</span>
+      <span>RPC: Pharos Pacific Mainnet (1672)</span>
+    </div>
+  `;
+
+  renderEvaluationTable(d.evaluations || []);
+}
+
+function renderEvaluationTable(evaluations) {
+  const tableBody = document.getElementById('evaluation-table-body');
+  if (!tableBody) return;
+  tableBody.innerHTML = '';
+
+  evaluations.forEach((evalItem) => {
+    const row = document.createElement('tr');
+    const statusBadge = evalItem.isEligible
+      ? '<span class="badge badge-success">Eligible</span>'
+      : '<span class="badge badge-danger">Excluded</span>';
+
+    const lockupText = evalItem.unbondingDays > 0 ? `${evalItem.unbondingDays.toFixed(1)} Days` : '0 Days (Instant)';
+
+    const factors = evalItem.isEligible
+      ? `<span class="text-emerald">${evalItem.pros.join('; ')}</span>`
+      : `<span class="text-danger">${evalItem.exclusionReason}</span>`;
+
+    row.innerHTML = `
+      <td><strong>${evalItem.venueName}</strong></td>
+      <td>${statusBadge}</td>
+      <td><strong class="${evalItem.score > 0 ? 'text-emerald' : 'text-muted'}">${evalItem.score.toFixed(1)}</strong></td>
+      <td>${evalItem.apyPercent > 0 ? evalItem.apyPercent.toFixed(2) + '%' : '0.0%'}</td>
+      <td>${lockupText}</td>
+      <td>${evalItem.tvlFormatted}</td>
+      <td style="max-width:320px;">${factors}</td>
+    `;
+    tableBody.appendChild(row);
+  });
 }
 
 // 5. Portfolio Position Inspector
@@ -271,36 +345,43 @@ async function queryPositions(address) {
   const tableBody = document.getElementById('positions-table-body');
   tableBody.innerHTML = '<tr><td colspan="7" class="text-center text-muted">Querying live contract balances...</td></tr>';
 
-  try {
-    const res = await fetch(`/api/positions?address=${address}`);
-    const data = await res.json();
+  const result = await safeFetchJson(`/api/positions?address=${address}`);
 
-    if (!data.success || !data.positions) {
-      tableBody.innerHTML = `<tr><td colspan="7" class="text-center alert-danger">${data.error || 'Query failed'}</td></tr>`;
-      return;
-    }
-
-    tableBody.innerHTML = '';
-    data.positions.forEach((pos) => {
-      const row = document.createElement('tr');
-      const statusText = pos.canWithdrawImmediately
-        ? '<span class="badge badge-success">Instant Unwrapping</span>'
-        : '<span class="badge badge-outline">Subject to Unbonding</span>';
-
-      row.innerHTML = `
-        <td><strong>${pos.protocolName}</strong></td>
-        <td>${pos.assetSymbol}</td>
-        <td><a href="https://www.pharosscan.xyz/address/${pos.contractAddress}" target="_blank" class="footer-link font-mono">${pos.contractAddress.slice(0, 8)}...${pos.contractAddress.slice(-6)}</a></td>
-        <td><strong>${pos.formattedBalance}</strong></td>
-        <td>${pos.underlyingValueFormatted}</td>
-        <td>${statusText}</td>
-        <td><span class="badge badge-outline">${pos.dataFreshness}</span></td>
-      `;
-      tableBody.appendChild(row);
-    });
-  } catch (err) {
-    tableBody.innerHTML = `<tr><td colspan="7" class="text-center alert-danger">Error: ${err.message}</td></tr>`;
+  if (!result.ok || !result.data?.success || !result.data?.positions) {
+    tableBody.innerHTML = `
+      <tr>
+        <td colspan="7" class="text-center alert-danger" style="padding:1rem;">
+          <strong>Position Query Failed (Status: ${result.status || 'Offline'}):</strong> ${result.error}
+          <div class="mt-2">
+            <button class="btn btn-secondary" style="font-size:0.75rem; padding:0.3rem 0.6rem;" onclick="queryPositions('${address}')">
+              Retry Query
+            </button>
+          </div>
+        </td>
+      </tr>
+    `;
+    return;
   }
+
+  const positions = result.data.positions;
+  tableBody.innerHTML = '';
+  positions.forEach((pos) => {
+    const row = document.createElement('tr');
+    const statusText = pos.canWithdrawImmediately
+      ? '<span class="badge badge-success">Instant Unwrapping</span>'
+      : '<span class="badge badge-outline">Subject to Unbonding</span>';
+
+    row.innerHTML = `
+      <td><strong>${pos.protocolName}</strong></td>
+      <td>${pos.assetSymbol}</td>
+      <td><a href="https://www.pharosscan.xyz/address/${pos.contractAddress}" target="_blank" class="footer-link font-mono">${pos.contractAddress.slice(0, 8)}...${pos.contractAddress.slice(-6)}</a></td>
+      <td><strong>${pos.formattedBalance}</strong></td>
+      <td>${pos.underlyingValueFormatted}</td>
+      <td>${statusText}</td>
+      <td><span class="badge badge-outline">${pos.dataFreshness}</span></td>
+    `;
+    tableBody.appendChild(row);
+  });
 }
 
 // 6. Transaction Preparation Workspace
@@ -316,24 +397,24 @@ function initActionForm() {
     const previewContainer = document.getElementById('tx-preview-container');
     previewContainer.innerHTML = '<div class="text-muted text-center" style="padding:2rem;">Validating parameters and compiling calldata...</div>';
 
-    try {
-      const res = await fetch('/api/prepare', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ protocolId, operation, amount, userAddress }),
-      });
+    const result = await safeFetchJson('/api/prepare', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ protocolId, operation, amount, userAddress }),
+    });
 
-      const json = await res.json();
-      if (!json.success || !json.transaction) {
-        previewContainer.innerHTML = `<div class="alert alert-danger">${json.error || 'Failed to prepare transaction'}</div>`;
-        return;
-      }
-
-      const tx = json.transaction;
-      renderTransactionPreview(tx);
-    } catch (err) {
-      previewContainer.innerHTML = `<div class="alert alert-danger">Error: ${err.message}</div>`;
+    if (!result.ok || !result.data?.success || !result.data?.transaction) {
+      previewContainer.innerHTML = `
+        <div class="alert alert-danger">
+          <strong>Transaction Preparation Error (Status: ${result.status || 'Offline'}):</strong>
+          <p style="margin:0.5rem 0 0.5rem 0;">${result.error || 'Failed to prepare transaction'}</p>
+        </div>
+      `;
+      return;
     }
+
+    const tx = result.data.transaction;
+    renderTransactionPreview(tx);
   });
 }
 
@@ -423,56 +504,60 @@ window.runFaultSimulation = async (mode) => {
   container.innerHTML = '<div class="text-muted">Injecting fault and probing resilience...</div>';
 
   const fault = mode === 'CLEAR' ? '' : mode;
-  try {
-    const res = await fetch(`/api/fault-test?target=faroo-stpros&fault=${fault}`);
-    const data = await res.json();
+  const result = await safeFetchJson(`/api/fault-test?target=faroo-stpros&fault=${fault}`);
 
-    if (!data.success) {
-      container.innerHTML = `<div class="alert alert-danger">${data.error}</div>`;
-      return;
-    }
-
+  if (!result.ok || !result.data?.success) {
     container.innerHTML = `
-      <div class="alert alert-success">
-        <strong>${data.testDescription}</strong>
-        <p style="margin-top:0.25rem;">${data.conclusion}</p>
-      </div>
-
-      <div class="grid-2col mt-4">
-        <div class="card">
-          <h4>Degraded Protocol Observation</h4>
-          <div class="metric-row mt-2">
-            <span class="metric-label">Target:</span>
-            <span class="metric-val">${data.degradedVenueStatus.name}</span>
-          </div>
-          <div class="metric-row">
-            <span class="metric-label">Status:</span>
-            <span class="metric-val text-danger"><strong>${data.degradedVenueStatus.status}</strong></span>
-          </div>
-          <div class="metric-row">
-            <span class="metric-label">Injected Error:</span>
-            <span class="metric-val font-mono" style="font-size:0.75rem;">${data.degradedVenueStatus.errorMessage}</span>
-          </div>
-        </div>
-
-        <div class="card">
-          <h4>Failover Routing Outcome</h4>
-          <div class="metric-row mt-2">
-            <span class="metric-label">Surviving Venues:</span>
-            <span class="metric-val text-emerald">${data.survivingVenuesCount} Online</span>
-          </div>
-          <div class="metric-row">
-            <span class="metric-label">Failover Selection:</span>
-            <span class="metric-val text-emerald"><strong>${data.failoverRoutingDecision.selectedVenue}</strong></span>
-          </div>
-          <p class="text-sm text-muted mt-2">${data.failoverRoutingDecision.selectionSummary}</p>
-        </div>
+      <div class="alert alert-danger">
+        <strong>Fault Simulation Failed (Status: ${result.status || 'Offline'}):</strong>
+        <p style="margin:0.5rem 0 0.5rem 0;">${result.error}</p>
+        <button class="btn btn-secondary" style="font-size:0.8rem; padding:0.4rem 0.8rem;" onclick="window.runFaultSimulation('${mode}')">
+          Retry Simulation
+        </button>
       </div>
     `;
-
-    // Also reload protocols to show degraded status
-    loadProtocols();
-  } catch (err) {
-    container.innerHTML = `<div class="alert alert-danger">Error: ${err.message}</div>`;
+    return;
   }
+
+  const data = result.data;
+  container.innerHTML = `
+    <div class="alert alert-success">
+      <strong>${data.testDescription}</strong>
+      <p style="margin-top:0.25rem;">${data.conclusion}</p>
+    </div>
+
+    <div class="grid-2col mt-4">
+      <div class="card">
+        <h4>Degraded Protocol Observation</h4>
+        <div class="metric-row mt-2">
+          <span class="metric-label">Target:</span>
+          <span class="metric-val">${data.degradedVenueStatus.name}</span>
+        </div>
+        <div class="metric-row">
+          <span class="metric-label">Status:</span>
+          <span class="metric-val text-danger"><strong>${data.degradedVenueStatus.status}</strong></span>
+        </div>
+        <div class="metric-row">
+          <span class="metric-label">Injected Error:</span>
+          <span class="metric-val font-mono" style="font-size:0.75rem;">${data.degradedVenueStatus.errorMessage}</span>
+        </div>
+      </div>
+
+      <div class="card">
+        <h4>Failover Routing Outcome</h4>
+        <div class="metric-row mt-2">
+          <span class="metric-label">Surviving Venues:</span>
+          <span class="metric-val text-emerald">${data.survivingVenuesCount} Online</span>
+        </div>
+        <div class="metric-row">
+          <span class="metric-label">Failover Selection:</span>
+          <span class="metric-val text-emerald"><strong>${data.failoverRoutingDecision.selectedVenue}</strong></span>
+        </div>
+        <p class="text-sm text-muted mt-2">${data.failoverRoutingDecision.selectionSummary}</p>
+      </div>
+    </div>
+  `;
+
+  // Also reload protocols to show degraded status
+  loadProtocols();
 };

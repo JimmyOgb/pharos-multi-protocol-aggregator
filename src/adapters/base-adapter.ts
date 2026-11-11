@@ -7,7 +7,7 @@ export abstract class BaseProtocolAdapter {
   private simulatedFault: string | null = null;
   protected cachedVenue: { venue: ProtocolVenue; timestamp: number } | null = null;
 
-  constructor(rpcClient: PharosRpcClient, timeoutMs = 10000) {
+  constructor(rpcClient: PharosRpcClient, timeoutMs = 15000) {
     this.rpcClient = rpcClient;
     this.timeoutMs = timeoutMs;
   }

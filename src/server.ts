@@ -20,7 +20,7 @@ const server = http.createServer(async (req, res) => {
   const parsedUrl = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
   const pathname = parsedUrl.pathname;
 
-  // API Routes
+  // Dedicated API Route Handlers
   if (pathname === '/api/health') {
     return healthHandler(req, res);
   }
@@ -38,6 +38,19 @@ const server = http.createServer(async (req, res) => {
   }
   if (pathname === '/api/fault-test') {
     return faultTestHandler(req, res);
+  }
+
+  // Prevent API requests from falling through to the frontend SPA fallback
+  if (pathname.startsWith('/api/')) {
+    res.statusCode = 404;
+    res.setHeader('Content-Type', 'application/json');
+    res.end(
+      JSON.stringify({
+        success: false,
+        error: `API route not found: ${pathname}`,
+      })
+    );
+    return;
   }
 
   // Static File Serving

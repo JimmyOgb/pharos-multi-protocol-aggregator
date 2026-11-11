@@ -2,10 +2,13 @@ import type { IncomingMessage, ServerResponse } from 'http';
 import { MultiProtocolAggregator } from '../core/aggregator.ts';
 import type { ProtocolId } from '../types/index.ts';
 
+const VALID_FAULTS = ['TIMEOUT', 'REVERT', 'NETWORK_ERROR'] as const;
+
 export default async function handler(req: IncomingMessage, res: ServerResponse) {
   res.setHeader('Content-Type', 'application/json');
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 
   if (req.method === 'OPTIONS') {
     res.statusCode = 204;
@@ -13,9 +16,21 @@ export default async function handler(req: IncomingMessage, res: ServerResponse)
     return;
   }
 
+  if (req.method !== 'GET' && req.method !== 'POST') {
+    res.statusCode = 405;
+    res.end(
+      JSON.stringify({
+        success: false,
+        error: `Method Not Allowed: ${req.method}. Supported methods: GET, POST`,
+      })
+    );
+    return;
+  }
+
   const url = new URL(req.url || '', `http://${req.headers.host || 'localhost'}`);
   const target = (url.searchParams.get('target') || 'faroo-stpros') as ProtocolId;
-  const fault = (url.searchParams.get('fault') || 'TIMEOUT') as 'TIMEOUT' | 'REVERT' | 'NETWORK_ERROR';
+  const rawFault = (url.searchParams.get('fault') || 'TIMEOUT').toUpperCase();
+  const fault = VALID_FAULTS.includes(rawFault as any) ? (rawFault as 'TIMEOUT' | 'REVERT' | 'NETWORK_ERROR') : 'TIMEOUT';
 
   const aggregator = new MultiProtocolAggregator();
   // Inject controlled fault
@@ -70,6 +85,6 @@ export default async function handler(req: IncomingMessage, res: ServerResponse)
     );
   } catch (err: any) {
     res.statusCode = 500;
-    res.end(JSON.stringify({ success: false, error: err.message }));
+    res.end(JSON.stringify({ success: false, error: err.message || 'Fault test execution failed' }));
   }
 }
