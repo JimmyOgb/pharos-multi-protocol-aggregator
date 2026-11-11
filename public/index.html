@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Pharos Multi-Protocol Aggregator — Unified Cross-Vault Agent</title>
+  <link rel="stylesheet" href="/styles.css">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%233b82f6'><circle cx='12' cy='12' r='10'/></svg>">
+</head>
+<body>
+  <header class="app-header">
+    <div class="header-container">
+      <div class="brand">
+        <div class="logo-badge">⬡</div>
+        <div>
+          <h1>Pharos Multi-Protocol Aggregator</h1>
+          <p class="subtitle">Harbor-Style Cross-Protocol Routing & Position Manager · Pharos Pacific Mainnet (1672)</p>
+        </div>
+      </div>
+      <div class="header-actions">
+        <div id="network-badge" class="badge badge-success">● Pacific Mainnet (1672)</div>
+        <button id="connect-wallet-btn" class="btn btn-secondary">Connect Wallet</button>
+      </div>
+    </div>
+  </header>
+
+  <main class="main-container">
+    <!-- Top Stats Banner -->
+    <section class="stats-banner">
+      <div class="stat-card">
+        <span class="stat-label">Integrated Protocols</span>
+        <span id="stat-protocols-count" class="stat-value">4 Protocols</span>
+        <span class="stat-meta">WPROS · Faroo stPROS · Uniswap V2 · Harbor</span>
+      </div>
+      <div class="stat-card">
+        <span class="stat-label">Aggregated On-Chain TVL</span>
+        <span id="stat-total-tvl" class="stat-value">~27.5M+ PROS</span>
+        <span class="stat-meta">Verified live via JSON-RPC</span>
+      </div>
+      <div class="stat-card">
+        <span class="stat-label">Maximum Available Yield</span>
+        <span id="stat-max-apy" class="stat-value">~7.20% APY</span>
+        <span class="stat-meta">Faroo Liquid Staking (stPROS)</span>
+      </div>
+      <div class="stat-card">
+        <span class="stat-label">Fault Isolation</span>
+        <span class="stat-value text-emerald">REQ-04 Ready</span>
+        <span class="stat-meta">Independent Per-Protocol Adapters</span>
+      </div>
+    </section>
+
+    <!-- Navigation Tabs -->
+    <nav class="tabs-nav">
+      <button class="tab-btn active" data-tab="routing">Intelligent Venue Routing</button>
+      <button class="tab-btn" data-tab="protocols">Protocol Registry</button>
+      <button class="tab-btn" data-tab="positions">Portfolio Inspector</button>
+      <button class="tab-btn" data-tab="actions">Transaction Workspace</button>
+      <button class="tab-btn" data-tab="fault-test">Fault Isolation Sandbox</button>
+    </nav>
+
+    <!-- TAB 1: INTELLIGENT ROUTING & COMPARISON -->
+    <section id="tab-routing" class="tab-content active">
+      <div class="grid-2col">
+        <!-- Routing Configuration Card -->
+        <div class="card">
+          <div class="card-header">
+            <h2>Optimal Venue Routing Engine</h2>
+            <span class="badge badge-primary">AI Harbor Agent</span>
+          </div>
+          <p class="text-muted">Enter your desired asset, amount, and liquidity preference. The aggregator inspects live venues on Pharos Pacific Mainnet and picks the optimal route with a complete explanation.</p>
+
+          <form id="routing-form" class="mt-4">
+            <div class="form-group">
+              <label for="route-asset">Asset</label>
+              <select id="route-asset" class="form-input">
+                <option value="PROS" selected>PROS (Native Pharos Gas Token)</option>
+                <option value="WPROS">WPROS (Wrapped PROS ERC-20)</option>
+                <option value="USDC">USDC (Circle Deployed Stablecoin)</option>
+              </select>
+            </div>
+
+            <div class="form-group">
+              <label for="route-amount">Deposit Amount</label>
+              <input type="number" id="route-amount" class="form-input" value="100" min="0.01" step="any" required>
+            </div>
+
+            <div class="form-group">
+              <label for="route-priority">Routing Strategy & Preference</label>
+              <select id="route-priority" class="form-input">
+                <option value="MAX_YIELD" selected>Maximum Yield (Highest Annual Staking Return)</option>
+                <option value="INSTANT_LIQUIDITY">Instant Liquidity (Zero Lockup / Immediate Unwrapping)</option>
+                <option value="BALANCED">Balanced (Optimizes Yield, TVL Security & Lockup)</option>
+              </select>
+            </div>
+
+            <button type="submit" id="calculate-route-btn" class="btn btn-primary w-full">Calculate Best Venue Route</button>
+          </form>
+        </div>
+
+        <!-- Routing Recommendation Output -->
+        <div class="card">
+          <div class="card-header">
+            <h2>Recommended Venue & Rationale</h2>
+            <span id="route-freshness-badge" class="badge badge-outline">Live Evaluation</span>
+          </div>
+
+          <div id="route-result-container">
+            <div class="placeholder-state">
+              <div class="spinner-small" style="display:none;" id="routing-spinner"></div>
+              <p>Click "Calculate Best Venue Route" to evaluate live options on Pharos.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Comparison Matrix Table -->
+      <div class="card mt-4">
+        <div class="card-header">
+          <h3>Venue Evaluation Matrix</h3>
+          <span class="text-muted text-sm">Real-time candidate score breakdown</span>
+        </div>
+        <div class="table-responsive">
+          <table class="data-table" id="evaluation-table">
+            <thead>
+              <tr>
+                <th>Venue Name</th>
+                <th>Status</th>
+                <th>Score</th>
+                <th>Net APY</th>
+                <th>Lockup / Unbonding</th>
+                <th>TVL Reserve</th>
+                <th>Eligibility & Key Factors</th>
+              </tr>
+            </thead>
+            <tbody id="evaluation-table-body">
+              <tr>
+                <td colspan="7" class="text-center text-muted">Awaiting routing calculation...</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- TAB 2: PROTOCOL REGISTRY -->
+    <section id="tab-protocols" class="tab-content">
+      <div class="card">
+        <div class="card-header">
+          <h2>Discovered On-Chain Protocols & Vaults</h2>
+          <button id="refresh-protocols-btn" class="btn btn-sm btn-secondary">↻ Refresh Live Data</button>
+        </div>
+        <p class="text-muted">Independent protocol adapters connected to verified smart contracts on Pharos Pacific Mainnet (Chain ID 1672).</p>
+
+        <div id="protocols-grid" class="protocols-grid mt-4">
+          <!-- Rendered dynamically -->
+        </div>
+      </div>
+    </section>
+
+    <!-- TAB 3: PORTFOLIO INSPECTOR -->
+    <section id="tab-positions" class="tab-content">
+      <div class="card">
+        <div class="card-header">
+          <h2>Multi-Protocol Portfolio Inspector</h2>
+          <span class="badge badge-primary">Read-Only RPC</span>
+        </div>
+        <p class="text-muted">Inspect user positions, balances, and share values across all integrated protocols simultaneously.</p>
+
+        <div class="portfolio-search-bar mt-4">
+          <input type="text" id="portfolio-address-input" class="form-input" placeholder="Enter Pharos wallet address (0x...)" value="0x13b0D85CcB8bf860b6b79AF3029fCA081AE9beF2">
+          <button id="query-positions-btn" class="btn btn-primary">Query On-Chain Positions</button>
+          <button id="use-my-wallet-btn" class="btn btn-secondary">Use Connected Wallet</button>
+        </div>
+
+        <div class="table-responsive mt-4">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Protocol</th>
+                <th>Asset / Share</th>
+                <th>Contract Address</th>
+                <th>User Balance</th>
+                <th>Underlying Equivalent</th>
+                <th>Withdrawal Status</th>
+                <th>Data Freshness</th>
+              </tr>
+            </thead>
+            <tbody id="positions-table-body">
+              <tr>
+                <td colspan="7" class="text-center text-muted">Enter a wallet address or click "Query On-Chain Positions" to load live positions.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- TAB 4: TRANSACTION WORKSPACE -->
+    <section id="tab-actions" class="tab-content">
+      <div class="grid-2col">
+        <!-- Action Configuration -->
+        <div class="card">
+          <div class="card-header">
+            <h2>Deposit & Withdrawal Preparation</h2>
+            <span class="badge badge-warning">Non-Custodial</span>
+          </div>
+          <p class="text-muted">Prepare unsigned transactions for client-side wallet review. The aggregator validates parameters, formats exact calldata, and never signs or broadcasts autonomously.</p>
+
+          <form id="action-form" class="mt-4">
+            <div class="form-group">
+              <label for="action-protocol">Protocol Venue</label>
+              <select id="action-protocol" class="form-input">
+                <option value="wpros">Wrapped PROS Canonical Native Vault</option>
+                <option value="faroo-stpros" selected>Faroo Liquid Staking Protocol (stPROS)</option>
+                <option value="uniswap-v2-pros">Uniswap V2 WPROS Pool</option>
+                <option value="harbor-apc3m">Harbor Axil Prime Credit 3M</option>
+              </select>
+            </div>
+
+            <div class="form-group">
+              <label for="action-type">Operation</label>
+              <select id="action-type" class="form-input">
+                <option value="DEPOSIT" selected>Deposit / Stake Assets</option>
+                <option value="WITHDRAW">Withdraw / Redeem Assets</option>
+              </select>
+            </div>
+
+            <div class="form-group">
+              <label for="action-amount">Amount</label>
+              <input type="number" id="action-amount" class="form-input" value="10" min="0.0001" step="any" required>
+            </div>
+
+            <div class="form-group">
+              <label for="action-wallet">User / Signer Address</label>
+              <input type="text" id="action-wallet" class="form-input" placeholder="0x..." value="0x13b0D85CcB8bf860b6b79AF3029fCA081AE9beF2" required>
+            </div>
+
+            <button type="submit" id="prepare-tx-btn" class="btn btn-primary w-full">Prepare Unsigned Transaction</button>
+          </form>
+        </div>
+
+        <!-- Unsigned Transaction Payload Preview -->
+        <div class="card">
+          <div class="card-header">
+            <h2>Unsigned Transaction Details</h2>
+            <span id="tx-status-badge" class="badge badge-outline">Ready for Preparation</span>
+          </div>
+
+          <div id="tx-preview-container">
+            <div class="placeholder-state">
+              <p>Configure parameters on the left and click "Prepare Unsigned Transaction" to generate the validated calldata payload.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- TAB 5: FAULT ISOLATION SANDBOX -->
+    <section id="tab-fault-test" class="tab-content">
+      <div class="card">
+        <div class="card-header">
+          <h2>Multi-Protocol Failure Handling Sandbox (Requirement 4)</h2>
+          <span class="badge badge-primary">Fault Injection Test</span>
+        </div>
+        <p class="text-muted">Test Requirement 04: "Handles one protocol being unavailable without breaking the others." Simulate an upstream outage or contract revert on Faroo Liquid Staking and observe how the aggregator preserves WPROS and seamlessly failovers without crashing.</p>
+
+        <div class="fault-controls mt-4">
+          <button class="btn btn-danger" onclick="window.runFaultSimulation('TIMEOUT')">Simulate Faroo Timeout (Gateway Timeout)</button>
+          <button class="btn btn-warning" onclick="window.runFaultSimulation('REVERT')">Simulate Faroo Revert (Contract Execution Error)</button>
+          <button class="btn btn-secondary" onclick="window.runFaultSimulation('CLEAR')">Restore All Protocols to Normal (Live)</button>
+        </div>
+
+        <div id="fault-results-container" class="mt-4">
+          <div class="alert alert-info">
+            Click one of the buttons above to inject a controlled fault and view live degraded-mode proof.
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="app-footer">
+    <div class="footer-container">
+      <div>
+        <strong>Pharos Multi-Protocol Aggregator</strong> · Cross-Tool DeFi Agent · Pharos Pacific Mainnet (1672)
+      </div>
+      <div>
+        <a href="https://github.com/JimmyOgb/pharos-multi-protocol-aggregator" target="_blank" class="footer-link">GitHub Repository</a> ·
+        <a href="https://www.pharosscan.xyz" target="_blank" class="footer-link">PharosScan Explorer</a> ·
+        <a href="/api/health" target="_blank" class="footer-link">Health API</a>
+      </div>
+    </div>
+  </footer>
+
+  <script src="/app.js"></script>
+</body>
+</html>
